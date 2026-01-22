@@ -1,8 +1,6 @@
 package modbus
 
 import (
-	"crypto/x509"
-	"encoding/asn1"
 	"errors"
 	"fmt"
 	"log"
@@ -11,11 +9,6 @@ import (
 	"sync"
 	"time"
 )
-
-// Modbus Role PEM OID (see R-21 of the MBAPS spec)
-var modbusRoleOID asn1.ObjectIdentifier = asn1.ObjectIdentifier{
-	1, 3, 6, 1, 4, 1, 50316, 802, 1,
-}
 
 // Server configuration object.
 type ServerConfiguration struct {
@@ -756,51 +749,5 @@ func (ms *ModbusServer) handleTransport(t transport, clientAddr string, clientRo
 	}
 
 	// never reached
-	return
-}
-
-// extractRole looks for Modbus Role extensions in a certificate and returns the
-// role as a string.
-// If no role extension is found, a nil string is returned (R-23).
-// If multiple or invalid role extensions are found, a nil string is returned (R-65, R-22).
-func (ms *ModbusServer) extractRole(cert *x509.Certificate) (role string) {
-	var err error
-	var found bool
-	var badCert bool
-
-	// walk through all extensions looking for Modbus Role OIDs
-	for _, ext := range cert.Extensions {
-		if ext.Id.Equal(modbusRoleOID) {
-
-			// there must be only one role extension per cert (R-65)
-			if found {
-				ms.logger.Warning("client certificate contains more than one role OIDs")
-				badCert = true
-				break
-			}
-			found = true
-
-			// the role extension must use UTF8String encoding (R-22)
-			// (the ASN1 tag for UTF8String is 0x0c)
-			if len(ext.Value) < 2 || ext.Value[0] != 0x0c {
-				badCert = true
-				break
-			}
-
-			// extract the ASN1 string
-			_, err = asn1.Unmarshal(ext.Value, &role)
-			if err != nil {
-				ms.logger.Warningf("failed to decode Modbus Role extension: %v", err)
-				badCert = true
-				break
-			}
-		}
-	}
-
-	// blank the role if we found more than one Role extension
-	if badCert {
-		role = ""
-	}
-
 	return
 }
