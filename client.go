@@ -1,8 +1,6 @@
 package modbus
 
 import (
-	"crypto/tls"
-	"crypto/x509"
 	"fmt"
 	"log"
 	"net"
@@ -50,12 +48,6 @@ type ClientConfiguration struct {
 	Timeout time.Duration
 	// NetworkConnectionTimeout sets the connect timeout value for TCP connections
 	NetworkConnectionTimeout time.Duration
-	// TLSClientCert sets the client-side TLS key pair (tcp+tls only)
-	TLSClientCert *tls.Certificate
-	// TLSRootCAs sets the list of CA certificates used to authenticate
-	// the server (tcp+tls only). Leaf (i.e. server) certificates can also
-	// be used in case of self-signed certs, or if cert pinning is required.
-	TLSRootCAs *x509.CertPool
 	// Logger provides a custom sink for log messages.
 	// If nil, messages will be written to stdout.
 	Logger *log.Logger
@@ -163,34 +155,6 @@ func NewClient(conf *ClientConfiguration) (mc *ModbusClient, err error) {
 
 		mc.transportType = modbusTCP
 
-	case "tcp+tls":
-		if mc.conf.Timeout == 0 {
-			mc.conf.Timeout = 1 * time.Second
-		}
-
-		if mc.conf.NetworkConnectionTimeout == 0 {
-			mc.conf.NetworkConnectionTimeout = 15 * time.Second
-		}
-
-		// expect a client-side certificate for mutual auth as the
-		// modbus/mpab protocol has no inherent auth facility.
-		// (see requirements R-08 and R-19 of the MBAPS spec)
-		if mc.conf.TLSClientCert == nil {
-			mc.logger.Errorf("missing client certificate")
-			err = ErrConfigurationError
-			return
-		}
-
-		// expect a CertPool object containing at least 1 CA or
-		// leaf certificate to validate the server-side cert
-		if mc.conf.TLSRootCAs == nil {
-			mc.logger.Errorf("missing CA/server certificate")
-			err = ErrConfigurationError
-			return
-		}
-
-		mc.transportType = modbusTCPOverTLS
-
 	case "udp":
 		if mc.conf.Timeout == 0 {
 			mc.conf.Timeout = 1 * time.Second
@@ -289,37 +253,6 @@ func (mc *ModbusClient) Open() (err error) {
 
 		// create the TCP transport
 		mc.transport = newTCPTransport(sock, mc.conf.Timeout, mc.conf.Logger)
-
-	case modbusTCPOverTLS:
-		// connect to the remote host with TLS
-		sock, err = tls.DialWithDialer(
-			&net.Dialer{
-				Deadline: time.Now().Add(mc.conf.NetworkConnectionTimeout),
-			}, "tcp", mc.conf.URL,
-			&tls.Config{
-				Certificates: []tls.Certificate{
-					*mc.conf.TLSClientCert,
-				},
-				RootCAs: mc.conf.TLSRootCAs,
-				// mandate TLS 1.2 or higher (see R-01 of the MBAPS spec)
-				MinVersion: tls.VersionTLS12,
-			})
-		if err != nil {
-			return
-		}
-
-		// force the TLS handshake
-		err = sock.(*tls.Conn).Handshake()
-		if err != nil {
-			sock.Close()
-			return
-		}
-
-		// create the TCP transport, wrapping the TLS socket in
-		// an adapter to work around write timeouts corrupting internal
-		// state (see https://pkg.go.dev/crypto/tls#Conn.SetWriteDeadline)
-		mc.transport = newTCPTransport(
-			newTLSSockWrapper(sock), mc.conf.Timeout, mc.conf.Logger)
 
 	case modbusTCPOverUDP:
 		// open a socket to the remote host (note: no actual connection is

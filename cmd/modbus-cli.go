@@ -1,7 +1,6 @@
 package main
 
 import (
-	"crypto/tls"
 	"encoding/hex"
 	"errors"
 	"flag"
@@ -20,10 +19,6 @@ func main() {
 	var client *modbus.ModbusClient
 	var config *modbus.ClientConfiguration
 	var target string
-	var caPath string   // path to TLS CA/server certificate
-	var certPath string // path to TLS client certificate
-	var keyPath string  // path to TLS client key
-	var clientKeyPair tls.Certificate
 	var speed uint
 	var dataBits uint
 	var parity string
@@ -45,9 +40,6 @@ func main() {
 	flag.StringVar(&endianness, "endianness", "big", "register endianness <little|big>")
 	flag.StringVar(&wordOrder, "word-order", "highfirst", "word ordering for 32-bit registers <highfirst|hf|lowfirst|lf>")
 	flag.UintVar(&unitId, "unit-id", 1, "unit/slave id to use")
-	flag.StringVar(&certPath, "cert", "", "path to TLS client certificate")
-	flag.StringVar(&keyPath, "key", "", "path to TLS client key")
-	flag.StringVar(&caPath, "ca", "", "path to TLS CA/server certificate")
 	flag.BoolVar(&help, "help", false, "show a wall-of-text help message")
 	flag.Parse()
 
@@ -109,37 +101,6 @@ func main() {
 		fmt.Printf("unknown word order setting '%s' (should be one of highfirst, hf, littlefirst, lf)\n",
 			wordOrder)
 		os.Exit(1)
-	}
-
-	// handle TLS options
-	if strings.HasPrefix(target, "tcp+tls://") {
-		if certPath == "" {
-			fmt.Print("TLS requested but no client certificate given, please use --cert\n")
-			os.Exit(1)
-		}
-
-		if keyPath == "" {
-			fmt.Print("TLS requested but no client key given, please use --key\n")
-			os.Exit(1)
-		}
-
-		if caPath == "" {
-			fmt.Print("TLS requested but no CA/server cert given, please use --ca\n")
-			os.Exit(1)
-		}
-
-		clientKeyPair, err = tls.LoadX509KeyPair(certPath, keyPath)
-		if err != nil {
-			fmt.Printf("failed to load client tls key pair: %v\n", err)
-			os.Exit(1)
-		}
-		config.TLSClientCert = &clientKeyPair
-
-		config.TLSRootCAs, err = modbus.LoadCertPool(caPath)
-		if err != nil {
-			fmt.Printf("failed to load tls CA/server certificate: %v\n", err)
-			os.Exit(1)
-		}
 	}
 
 	if len(flag.Args()) == 0 {
